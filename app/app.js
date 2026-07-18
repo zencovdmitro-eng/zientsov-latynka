@@ -22,6 +22,7 @@ let SPELL = null;
 const DB = isMainThread ? new DatabaseSync(path.join(ROOT, 'data', 'zientsov_latynka_slovnyk.sqlite3'), {readOnly: true}) : null;
 const SURZHYK = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'surzhyk_replacements.json'), 'utf8'));
 const CORRECTIONS = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'correction_overrides.json'), 'utf8'));
+const TRANSLATION_HINTS = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'translation_hints.json'), 'utf8'));
 
 const CYR = new Set([...('АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ' + 'абвгґдеєжзиіїйклмнопрстуфхцчшщьюя')]);
 const LAT = new Set([...('ABCDEFGHIJKLMNOPRSTUVYZabcdefghijklmnoprstuvyzĆćČčĎďĽľŇňŔŕŚśŠšŤťŹźŽžʹ')]);
@@ -115,7 +116,16 @@ function search(query) {
   const escaped=q.replace(/[\\%_]/g,'\\$&');
   return DB.prepare(`SELECT latin,cyrillic,CASE WHEN latin_fold=? OR cyrillic_fold=? THEN 0 WHEN latin_fold LIKE ? ESCAPE '\\' OR cyrillic_fold LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END rank FROM words WHERE latin_fold=? OR cyrillic_fold=? OR latin_fold LIKE ? ESCAPE '\\' OR cyrillic_fold LIKE ? ESCAPE '\\' OR latin_fold LIKE ? ESCAPE '\\' OR cyrillic_fold LIKE ? ESCAPE '\\' ORDER BY rank,length(latin),latin_fold LIMIT ?`).all(q,q,escaped+'%',escaped+'%',q,q,escaped+'%',escaped+'%','%'+escaped+'%','%'+escaped+'%',MAX_RESULTS).map(({latin,cyrillic})=>({latin,cyrillic}));
 }
-function json(res,value,status=200) {const body=Buffer.from(JSON.stringify(value)); res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Content-Length':body.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(body);}
+const SECURITY_HEADERS = {
+  'Cache-Control':'no-store',
+  'X-Content-Type-Options':'nosniff',
+  'X-Frame-Options':'DENY',
+  'Referrer-Policy':'no-referrer',
+  'Cross-Origin-Opener-Policy':'same-origin',
+  'Cross-Origin-Resource-Policy':'same-origin',
+  'Permissions-Policy':'camera=(), microphone=(), geolocation=()'
+};
+function json(res,value,status=200) {const body=Buffer.from(JSON.stringify(value)); res.writeHead(status,{...SECURITY_HEADERS,'Content-Type':'application/json; charset=utf-8','Content-Length':body.length}); res.end(body);}
 const pendingSpell = new Map();
 let spellSequence = 0;
 let spellWorker = null;
@@ -126,16 +136,16 @@ function requestSpell(type,text,direction) {
 async function conversion(text,direction) {if (!['latin','cyrillic'].includes(direction)) return {ok:false,error:'invalid_direction',errors:[]}; const errors=await requestSpell('text',text,direction); return errors.length?{ok:false,result:'',errors}:{ok:true,result:direction==='latin'?cyrToLat(text):latToCyr(text),errors:[]};}
 async function handler(req,res) {
   const url=new URL(req.url,'http://localhost');
-  if (req.method==='GET' && url.pathname==='/') {res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Length':HTML.length,'Cache-Control':'no-store'}); return res.end(HTML);}
+  if (req.method==='GET' && url.pathname==='/') {res.writeHead(200,{...SECURITY_HEADERS,'Content-Type':'text/html; charset=utf-8','Content-Length':HTML.length,'Content-Security-Policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"}); return res.end(HTML);}
   if (req.method==='GET' && url.pathname==='/api/stats') return json(res,Object.fromEntries(DB.prepare('SELECT key,value FROM metadata').all().map(x=>[x.key,x.value])));
-  if (req.method==='GET' && url.pathname==='/api/search') {const query=(url.searchParams.get('q')||'').slice(0,100); const results=search(query); let suggestions=[]; if(query && !results.length && [...query.matchAll(WORD_PATTERN)].length===1){const direction=scriptOf(normalized(query))==='cyrillic'?'latin':'cyrillic'; const check=await requestSpell('word',query,direction); if(check.reason==='misspelled') suggestions=check.suggestions;} return json(res,{query,results,suggestions});}
+  if (req.method==='GET' && url.pathname==='/api/search') {const query=(url.searchParams.get('q')||'').slice(0,100),normalizedQuery=normalized(query).toLowerCase().trim(); const results=search(query); let suggestions=[],reason='',options=[]; const hint=TRANSLATION_HINTS[normalizedQuery]; if(query && !results.length && hint){options=hint.options||[];suggestions=options.map(item=>item.word);reason='translation';}else if(query && !results.length && [...query.matchAll(WORD_PATTERN)].length===1){const direction=scriptOf(normalized(query))==='cyrillic'?'latin':'cyrillic'; const check=await requestSpell('word',query,direction); if(['misspelled','surzhyk'].includes(check.reason)){suggestions=check.suggestions;reason=check.reason;}} return json(res,{query,results,suggestions,reason,options});}
   if (req.method==='GET' && url.pathname==='/api/convert') return json(res,await conversion((url.searchParams.get('text')||'').slice(0,MAX_TEXT_LENGTH),url.searchParams.get('direction')||'latin'));
   if (req.method==='GET' && url.pathname==='/api/spellcheck') {const direction=url.searchParams.get('direction')||'latin',errors=await requestSpell('text',(url.searchParams.get('text')||'').slice(0,MAX_TEXT_LENGTH),direction); return json(res,{ok:!errors.length,errors});}
   if (req.method==='POST' && ['/api/convert','/api/spellcheck'].includes(url.pathname)) {let raw=''; req.on('data',c=>{raw+=c;if(raw.length>100000)req.destroy();}); req.on('end',async()=>{try{const p=JSON.parse(raw),text=String(p.text||'').slice(0,MAX_TEXT_LENGTH),direction=String(p.direction||'latin'); if(url.pathname==='/api/convert')return json(res,await conversion(text,direction)); const errors=await requestSpell('text',text,direction); return json(res,{ok:!errors.length,errors});}catch{return json(res,{error:'invalid_request'},400);}}); return;}
   return json(res,{error:'not_found'},404);
 }
 function browserPath() {const env=process.env; const candidates=[[env['PROGRAMFILES(X86)'],'Microsoft','Edge','Application','msedge.exe'],[env.PROGRAMFILES,'Microsoft','Edge','Application','msedge.exe'],[env.LOCALAPPDATA,'Microsoft','Edge','Application','msedge.exe'],[env.PROGRAMFILES,'Google','Chrome','Application','chrome.exe']]; for(const parts of candidates){if(!parts[0])continue;const p=path.join(...parts);if(fs.existsSync(p))return p;} return null;}
-function openWindow(){if(process.platform!=='win32')return; const exe=browserPath(); let child; if(exe){child=spawn(exe,[`--app=http://${HOST}:${PORT}/`,'--start-maximized'],{detached:true,stdio:'ignore'});}else{child=spawn('cmd.exe',['/c','start','',`http://${HOST}:${PORT}/`],{detached:true,stdio:'ignore'});} child.on('error',()=>{}); child.unref();}
+function openWindow(){if(process.platform!=='win32'||process.env.ZIENTSOV_NO_WINDOW==='1')return; const exe=browserPath(); let child; if(exe){child=spawn(exe,[`--app=http://${HOST}:${PORT}/`,'--start-maximized'],{detached:true,stdio:'ignore'});}else{child=spawn('cmd.exe',['/c','start','',`http://${HOST}:${PORT}/`],{detached:true,stdio:'ignore'});} child.on('error',()=>{}); child.unref();}
 if (!isMainThread && workerData && workerData.spellWorker) {
   const aff=Buffer.from(fs.readFileSync(path.join(ROOT,'source','index.aff'),'utf8').split(/\r?\n/).filter(line=>!/^COMPOUND/.test(line)).join('\n'),'utf8');
   const dic=fs.readFileSync(path.join(ROOT,'source','index.dic'));
