@@ -3,6 +3,9 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+const {once} = require('events');
 const {spawn} = require('child_process');
 const {Worker, isMainThread, parentPort, workerData} = require('worker_threads');
 const {DatabaseSync} = require('node:sqlite');
@@ -15,6 +18,14 @@ const PORT = Number(process.env.ZIENTSOV_PORT || 8765);
 const MAX_RESULTS = 60;
 const MAX_TEXT_LENGTH = 20000;
 const MAX_SUGGESTIONS = 6;
+const PROJECT_REPOSITORY = 'zencovdmitro-eng/zientsov-latynka';
+const UPDATE_API = process.env.ZIENTSOV_TEST_MODE === '1' && process.env.ZIENTSOV_UPDATE_API
+  ? process.env.ZIENTSOV_UPDATE_API
+  : `https://api.github.com/repos/${PROJECT_REPOSITORY}/releases/latest`;
+const UPDATE_DIRECTORY = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'ZIENTSOV_LATYNKA', 'updates');
+const UPDATE_TIMEOUT_MS = 7000;
+const MAX_UPDATE_SIZE = 250 * 1024 * 1024;
+const SESSION_TOKEN = isMainThread ? crypto.randomBytes(32).toString('hex') : '';
 const HTML = isMainThread ? fs.readFileSync(path.join(ROOT, 'web', 'index.html')) : null;
 // nspell implements compound rules more permissively than the project checker.
 // Disable those rules so accidental word concatenations cannot pass as valid words.
@@ -23,6 +34,10 @@ const DB = isMainThread ? new DatabaseSync(path.join(ROOT, 'data', 'zientsov_lat
 const SURZHYK = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'surzhyk_replacements.json'), 'utf8'));
 const CORRECTIONS = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'correction_overrides.json'), 'utf8'));
 const TRANSLATION_HINTS = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'translation_hints.json'), 'utf8'));
+let UPDATE_STATE = {status:'idle',available:false};
+let UPDATE_CANDIDATE = null;
+let UPDATE_DOWNLOAD = null;
+let LAST_UPDATE_CHECK = 0;
 
 const CYR = new Set([...('АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ' + 'абвгґдеєжзиіїйклмнопрстуфхцчшщьюя')]);
 const LAT = new Set([...('ABCDEFGHIJKLMNOPRSTUVYZabcdefghijklmnoprstuvyzĆćČčĎďĽľŇňŔŕŚśŠšŤťŹźŽžʹ')]);
@@ -126,6 +141,163 @@ const SECURITY_HEADERS = {
   'Permissions-Policy':'camera=(), microphone=(), geolocation=()'
 };
 function json(res,value,status=200) {const body=Buffer.from(JSON.stringify(value)); res.writeHead(status,{...SECURITY_HEADERS,'Content-Type':'application/json; charset=utf-8','Content-Length':body.length}); res.end(body);}
+
+function currentVersion() {
+  try { return String(DB.prepare("SELECT value FROM metadata WHERE key='version'").get().value); }
+  catch { return '0.0.0'; }
+}
+function parseVersion(value) {
+  const match=String(value||'').trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+function compareVersions(left,right) {
+  const a=parseVersion(left),b=parseVersion(right);
+  if(!a||!b)throw new Error('invalid_version');
+  for(let index=0;index<3;index++){if(a[index]!==b[index])return a[index]>b[index]?1:-1;}
+  return 0;
+}
+function publicUpdateState() {
+  const state={...UPDATE_STATE,currentVersion:currentVersion()};
+  delete state.filePath;
+  return state;
+}
+function isAllowedUpdateUrl(value) {
+  try {
+    const url=new URL(value);
+    if(process.env.ZIENTSOV_TEST_MODE==='1')return ['127.0.0.1','localhost'].includes(url.hostname);
+    const prefix=`/${PROJECT_REPOSITORY}/releases/download/`;
+    return url.protocol==='https:'&&url.hostname==='github.com'&&url.pathname.startsWith(prefix);
+  } catch { return false; }
+}
+async function fetchWithTimeout(url,options={}) {
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),UPDATE_TIMEOUT_MS);
+  try {
+    return await fetch(url,{...options,redirect:'follow',signal:controller.signal,headers:{'Accept':'application/vnd.github+json','User-Agent':'ZIENTSOV-LATYNKA-Updater',...(options.headers||{})}});
+  } finally { clearTimeout(timer); }
+}
+async function readJsonResponse(response) {
+  if(!response.ok)throw new Error(`http_${response.status}`);
+  const text=await response.text();
+  if(text.length>1024*1024)throw new Error('response_too_large');
+  try{return JSON.parse(text);}catch{throw new Error('invalid_json');}
+}
+function validateUpdateManifest(manifest,release,version) {
+  if(!manifest||manifest.schema!==1||manifest.product!=='ZIENTSOV LATYNKA'||manifest.channel!=='stable')throw new Error('invalid_manifest');
+  if(compareVersions(manifest.version,version)!==0||compareVersions(version,currentVersion())<=0)throw new Error('invalid_manifest_version');
+  const installer=manifest.installer||{};
+  const expectedName=`ZIENTSOV_LATYNKA_Setup_v${version}.exe`;
+  if(installer.name!==expectedName||!/^[a-f0-9]{64}$/i.test(installer.sha256||''))throw new Error('invalid_installer_metadata');
+  if(!Number.isSafeInteger(installer.size)||installer.size<1024||installer.size>MAX_UPDATE_SIZE)throw new Error('invalid_installer_size');
+  const asset=(release.assets||[]).find(item=>item.name===installer.name);
+  if(!asset||asset.size!==installer.size||!isAllowedUpdateUrl(asset.browser_download_url))throw new Error('installer_asset_mismatch');
+  return {
+    version,
+    filename:installer.name,
+    sha256:installer.sha256.toLowerCase(),
+    size:installer.size,
+    downloadUrl:asset.browser_download_url,
+    notes:Array.isArray(manifest.notes)?manifest.notes.slice(0,12).map(item=>String(item).slice(0,300)):[],
+    publishedAt:String(manifest.published_at||release.published_at||''),
+    mandatory:Boolean(manifest.mandatory)
+  };
+}
+async function checkForUpdate(force=false) {
+  if(UPDATE_DOWNLOAD)return publicUpdateState();
+  if(!force&&LAST_UPDATE_CHECK&&Date.now()-LAST_UPDATE_CHECK<30000)return publicUpdateState();
+  UPDATE_STATE={status:'checking',available:false};
+  try {
+    const release=await readJsonResponse(await fetchWithTimeout(UPDATE_API));
+    LAST_UPDATE_CHECK=Date.now();
+    const versionMatch=String(release.tag_name||'').match(/^v?(\d+\.\d+\.\d+)$/);
+    if(!versionMatch||release.draft||release.prerelease)throw new Error('invalid_release');
+    const version=versionMatch[1];
+    if(compareVersions(version,currentVersion())<=0){UPDATE_CANDIDATE=null;UPDATE_STATE={status:'current',available:false,checkedAt:new Date().toISOString()};return publicUpdateState();}
+    const manifestName=`ZIENTSOV_LATYNKA_Update_v${version}.json`;
+    const manifestAsset=(release.assets||[]).find(item=>item.name===manifestName);
+    if(!manifestAsset||!isAllowedUpdateUrl(manifestAsset.browser_download_url))throw new Error('manifest_missing');
+    const manifest=await readJsonResponse(await fetchWithTimeout(manifestAsset.browser_download_url,{headers:{'Accept':'application/json'}}));
+    UPDATE_CANDIDATE=validateUpdateManifest(manifest,release,version);
+    UPDATE_STATE={status:'available',available:true,version,filename:UPDATE_CANDIDATE.filename,size:UPDATE_CANDIDATE.size,notes:UPDATE_CANDIDATE.notes,publishedAt:UPDATE_CANDIDATE.publishedAt,mandatory:UPDATE_CANDIDATE.mandatory,verification:'sha256'};
+  } catch(error) {
+    UPDATE_STATE={status:'error',available:false,error:String(error.message||error)};
+  }
+  return publicUpdateState();
+}
+async function sha256File(filePath) {
+  const hash=crypto.createHash('sha256');
+  const stream=fs.createReadStream(filePath);
+  for await(const chunk of stream)hash.update(chunk);
+  return hash.digest('hex');
+}
+async function downloadUpdate() {
+  const candidate=UPDATE_CANDIDATE;
+  if(!candidate)throw new Error('update_not_selected');
+  fs.mkdirSync(UPDATE_DIRECTORY,{recursive:true});
+  const finalPath=path.join(UPDATE_DIRECTORY,candidate.filename);
+  const partialPath=finalPath+'.part';
+  try {
+    if(fs.existsSync(finalPath)){
+      const stat=fs.statSync(finalPath);
+      if(stat.size===candidate.size&&await sha256File(finalPath)===candidate.sha256){UPDATE_STATE={...UPDATE_STATE,status:'ready',available:true,downloaded:candidate.size,total:candidate.size,progress:100,filePath:finalPath};return;}
+      fs.unlinkSync(finalPath);
+    }
+    try{fs.unlinkSync(partialPath);}catch{}
+    UPDATE_STATE={...UPDATE_STATE,status:'downloading',available:true,downloaded:0,total:candidate.size,progress:0};
+    const response=await fetchWithTimeout(candidate.downloadUrl,{headers:{'Accept':'application/octet-stream'}});
+    if(!response.ok||!response.body)throw new Error(`download_http_${response.status}`);
+    const announced=Number(response.headers.get('content-length')||0);
+    if(announced>MAX_UPDATE_SIZE)throw new Error('download_too_large');
+    const output=fs.createWriteStream(partialPath,{flags:'wx'});
+    const hash=crypto.createHash('sha256');
+    let downloaded=0;
+    try {
+      for await(const value of response.body){const chunk=Buffer.from(value);downloaded+=chunk.length;if(downloaded>candidate.size||downloaded>MAX_UPDATE_SIZE)throw new Error('download_size_mismatch');hash.update(chunk);if(!output.write(chunk))await once(output,'drain');UPDATE_STATE={...UPDATE_STATE,downloaded,total:candidate.size,progress:Math.min(99,Math.floor(downloaded*100/candidate.size))};}
+      const finished=once(output,'finish');output.end();await finished;
+    } catch(error) {output.destroy();throw error;}
+    if(downloaded!==candidate.size||hash.digest('hex')!==candidate.sha256)throw new Error('checksum_mismatch');
+    fs.renameSync(partialPath,finalPath);
+    UPDATE_STATE={...UPDATE_STATE,status:'ready',available:true,downloaded,total:candidate.size,progress:100,filePath:finalPath};
+  } catch(error) {
+    try{fs.unlinkSync(partialPath);}catch{}
+    UPDATE_STATE={status:'error',available:true,version:candidate.version,error:String(error.message||error)};
+  } finally { UPDATE_DOWNLOAD=null; }
+}
+function startUpdateDownload() {
+  if(!UPDATE_CANDIDATE)throw new Error('update_not_available');
+  if(!UPDATE_DOWNLOAD)UPDATE_DOWNLOAD=downloadUpdate();
+  return publicUpdateState();
+}
+function startUpdateInstall() {
+  if(process.platform!=='win32')throw new Error('windows_only');
+  const filePath=UPDATE_STATE.filePath;
+  if(UPDATE_STATE.status!=='ready'||!filePath||!fs.existsSync(filePath))throw new Error('update_not_ready');
+  UPDATE_STATE={...UPDATE_STATE,status:'installing'};
+  setTimeout(()=>{
+    try {
+      const child=spawn(filePath,[],{detached:true,stdio:'ignore',windowsHide:false});
+      child.once('spawn',()=>{child.unref();setTimeout(()=>process.exit(0),500);});
+      child.once('error',error=>{UPDATE_STATE={status:'error',available:true,error:String(error.message||error)};});
+    } catch(error) {UPDATE_STATE={status:'error',available:true,error:String(error.message||error)};}
+  },250);
+  return publicUpdateState();
+}
+function authorizedUpdateRequest(req) {
+  const provided=String(req.headers['x-zientsov-token']||'');
+  if(provided.length!==SESSION_TOKEN.length)return false;
+  return crypto.timingSafeEqual(Buffer.from(provided),Buffer.from(SESSION_TOKEN));
+}
+function validLocalHost(req) {
+  const host=String(req.headers.host||'').toLowerCase();
+  return [HOST,`${HOST}:${PORT}`,'localhost',`localhost:${PORT}`].includes(host);
+}
+function cleanupOldUpdates() {
+  try {
+    fs.mkdirSync(UPDATE_DIRECTORY,{recursive:true});
+    const limit=Date.now()-30*24*60*60*1000;
+    for(const name of fs.readdirSync(UPDATE_DIRECTORY)){const filePath=path.join(UPDATE_DIRECTORY,name);const stat=fs.statSync(filePath);if(stat.isFile()&&(name.endsWith('.part')||stat.mtimeMs<limit))fs.unlinkSync(filePath);}
+  } catch {}
+}
 const pendingSpell = new Map();
 let spellSequence = 0;
 let spellWorker = null;
@@ -135,9 +307,16 @@ function requestSpell(type,text,direction) {
 }
 async function conversion(text,direction) {if (!['latin','cyrillic'].includes(direction)) return {ok:false,error:'invalid_direction',errors:[]}; const errors=await requestSpell('text',text,direction); return errors.length?{ok:false,result:'',errors}:{ok:true,result:direction==='latin'?cyrToLat(text):latToCyr(text),errors:[]};}
 async function handler(req,res) {
+  if(!validLocalHost(req))return json(res,{error:'invalid_host'},403);
   const url=new URL(req.url,'http://localhost');
   if (req.method==='GET' && url.pathname==='/') {res.writeHead(200,{...SECURITY_HEADERS,'Content-Type':'text/html; charset=utf-8','Content-Length':HTML.length,'Content-Security-Policy':"default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"}); return res.end(HTML);}
   if (req.method==='GET' && url.pathname==='/api/stats') return json(res,Object.fromEntries(DB.prepare('SELECT key,value FROM metadata').all().map(x=>[x.key,x.value])));
+  if (req.method==='GET' && url.pathname==='/api/session') return json(res,{token:SESSION_TOKEN});
+  if (url.pathname.startsWith('/api/update/')&&!authorizedUpdateRequest(req))return json(res,{error:'forbidden'},403);
+  if (req.method==='GET' && url.pathname==='/api/update/check') return json(res,await checkForUpdate(url.searchParams.get('force')==='1'));
+  if (req.method==='GET' && url.pathname==='/api/update/status') return json(res,publicUpdateState());
+  if (req.method==='POST' && url.pathname==='/api/update/download') {try{return json(res,startUpdateDownload(),202);}catch(error){return json(res,{error:String(error.message||error)},409);}}
+  if (req.method==='POST' && url.pathname==='/api/update/install') {try{return json(res,startUpdateInstall(),202);}catch(error){return json(res,{error:String(error.message||error)},409);}}
   if (req.method==='GET' && url.pathname==='/api/search') {const query=(url.searchParams.get('q')||'').slice(0,100),normalizedQuery=normalized(query).toLowerCase().trim(); const results=search(query); let suggestions=[],reason='',options=[]; const hint=TRANSLATION_HINTS[normalizedQuery]; if(query && !results.length && hint){options=hint.options||[];suggestions=options.map(item=>item.word);reason='translation';}else if(query && !results.length && [...query.matchAll(WORD_PATTERN)].length===1){const direction=scriptOf(normalized(query))==='cyrillic'?'latin':'cyrillic'; const check=await requestSpell('word',query,direction); if(['misspelled','surzhyk'].includes(check.reason)){suggestions=check.suggestions;reason=check.reason;}} return json(res,{query,results,suggestions,reason,options});}
   if (req.method==='GET' && url.pathname==='/api/convert') return json(res,await conversion((url.searchParams.get('text')||'').slice(0,MAX_TEXT_LENGTH),url.searchParams.get('direction')||'latin'));
   if (req.method==='GET' && url.pathname==='/api/spellcheck') {const direction=url.searchParams.get('direction')||'latin',errors=await requestSpell('text',(url.searchParams.get('text')||'').slice(0,MAX_TEXT_LENGTH),direction); return json(res,{ok:!errors.length,errors});}
@@ -153,6 +332,7 @@ if (!isMainThread && workerData && workerData.spellWorker) {
   parentPort.on('message',message=>{try{const value=message.type==='word'?spellWord(message.text,message.direction):spellText(message.text,message.direction);parentPort.postMessage({id:message.id,value});}catch(error){parentPort.postMessage({id:message.id,error:String(error.message||error)});}});
   parentPort.postMessage({ready:true});
 } else {
+  cleanupOldUpdates();
   spellWorker=new Worker(__filename,{workerData:{spellWorker:true}});
   spellWorker.on('message',message=>{if(message.ready)return;const pending=pendingSpell.get(message.id);if(!pending)return;pendingSpell.delete(message.id);message.error?pending.reject(new Error(message.error)):pending.resolve(message.value);});
   spellWorker.on('error',error=>{for(const pending of pendingSpell.values())pending.reject(error);pendingSpell.clear();});

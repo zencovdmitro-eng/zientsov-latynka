@@ -26,6 +26,7 @@ const errors = [
   {word:'Дмиро', start:19, end:24, reason:'misspelled', suggestions:['Дмитро']}
 ];
 let copied = '';
+let updateTokenSeen = false;
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
@@ -34,7 +35,14 @@ const dom = new JSDOM(html, {
     window.scrollTo = () => {};
     window.fetch = async (url, options={}) => {
       const target = String(url);
-      if (target.includes('/api/stats')) return response({project:'ZIENTSOV LATYNKA', version:'0.4.11', unique_entries:'322682'});
+      if (target.includes('/api/stats')) return response({project:'ZIENTSOV LATYNKA', version:'0.4.12', unique_entries:'322682'});
+      if (target.includes('/api/session')) return response({token:'qa-session-token'});
+      if (target.includes('/api/update/check')) {
+        updateTokenSeen = options.headers['X-ZIENTSOV-Token'] === 'qa-session-token';
+        return response({status:'available',available:true,currentVersion:'0.4.12',version:'0.4.13',size:50000000,notes:['Оновлено словникові правила.'],mandatory:false});
+      }
+      if (target.includes('/api/update/download')) return response({status:'downloading',available:true,currentVersion:'0.4.12',version:'0.4.13',downloaded:1000,total:50000000,progress:1});
+      if (target.includes('/api/update/status')) return response({status:'ready',available:true,currentVersion:'0.4.12',version:'0.4.13',downloaded:50000000,total:50000000,progress:100});
       if (target.includes('/api/search')) {
         const query = new URL(target, 'http://127.0.0.1:8765/').searchParams.get('q');
         if (query === 'здание') return response({
@@ -69,7 +77,7 @@ function wait(milliseconds) {
 (async () => {
   const {document, Event} = dom.window;
   await wait(30);
-  assert.equal(document.querySelector('#version-badge').textContent, 'Версія 0.4.11');
+  assert.equal(document.querySelector('#version-badge').textContent, 'Версія 0.4.12');
   assert.match(document.querySelector('#stats').textContent, /322[\s\u00a0]?682/);
 
   const input = document.querySelector('#source-text');
@@ -110,7 +118,18 @@ function wait(milliseconds) {
   assert.equal(document.querySelector('.result-latin').textContent, 'Ukrajina');
   assert.equal(document.querySelector('.result-cyrillic').textContent, 'Україна');
 
-  console.log('QA UI PASS: мова, версія, «Виправити все», копіювання, обидва напрями, переклад-підказка та пошук.');
+  document.querySelector('#check-updates').click();
+  await wait(25);
+  assert.equal(updateTokenSeen, true, 'Запит оновлення не захищено сеансовим токеном');
+  assert.equal(document.querySelector('#update-banner').hidden, false);
+  assert.match(document.querySelector('#update-title').textContent, /0\.4\.13/);
+  assert.equal(document.querySelector('#download-update').hidden, false);
+  document.querySelector('#download-update').click();
+  await wait(620);
+  assert.equal(document.querySelector('#install-update').hidden, false);
+  assert.match(document.querySelector('#update-details').textContent, /SHA-256/);
+
+  console.log('QA UI PASS: мова, версія, виправлення, пошук і захищений інтерфейс оновлення.');
   dom.window.close();
 })().catch(error => {
   console.error(error.stack || error);

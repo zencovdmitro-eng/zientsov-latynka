@@ -2,12 +2,12 @@ Unicode True
 !include "MUI2.nsh"
 
 !define APP_NAME "ZIENTSOV LATYNKA"
-!define APP_VERSION "0.4.11"
+!define APP_VERSION "0.4.12"
 !define APP_PUBLISHER "Зєнцов Дмитро Володимирович"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA"
 
 Name "${APP_NAME} ${APP_VERSION}"
-OutFile "..\ZIENTSOV_LATYNKA_Setup_v0.4.11.exe"
+OutFile "..\ZIENTSOV_LATYNKA_Setup_v0.4.12.exe"
 InstallDir "$LOCALAPPDATA\Programs\ZIENTSOV LATYNKA"
 InstallDirRegKey HKCU "Software\ZIENTSOV_LATYNKA" "InstallDir"
 RequestExecutionLevel user

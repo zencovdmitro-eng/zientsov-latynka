@@ -26,6 +26,7 @@
     }
 
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html { min-width: 320px; background: var(--wash); }
     body {
       min-height: 100vh;
@@ -92,7 +93,38 @@
       font-size: 12px;
       font-weight: 750;
     }
+    .update-trigger { transition: border-color .18s, color .18s, background .18s; }
+    .update-trigger:hover { border-color: #9bbcf5; color: var(--blue-dark); background: var(--sky); }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #15a579; box-shadow: 0 0 0 4px #dff7ef; }
+
+    .update-banner {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 13px;
+      margin-bottom: 18px;
+      padding: 15px 17px;
+      border: 1px solid #b9d1fb;
+      border-radius: 18px;
+      background: rgba(239,246,255,.96);
+      box-shadow: 0 12px 30px rgba(24,54,104,.09);
+    }
+    .update-banner.error { border-color: #ffc8c2; background: var(--error-bg); }
+    .update-symbol { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: white; background: linear-gradient(145deg, var(--navy), var(--blue)); font-size: 20px; font-weight: 900; }
+    .update-banner.error .update-symbol { background: var(--error); }
+    .update-copy { min-width: 0; }
+    .update-title { margin: 1px 0 3px; font-size: 14px; font-weight: 900; }
+    .update-details { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .update-notes { margin: 7px 0 0; padding-left: 18px; color: #43516b; font-size: 12px; line-height: 1.5; }
+    .update-progress { height: 7px; overflow: hidden; margin-top: 10px; border-radius: 999px; background: #d8e5f8; }
+    .update-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--blue-dark), var(--blue)); transition: width .2s; }
+    .update-settings { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 9px; color: #58667d; font-size: 11px; }
+    .update-settings label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .update-settings input { accent-color: var(--blue); }
+    .update-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .update-actions button { min-height: 37px; border-radius: 10px; padding: 0 12px; font-size: 12px; font-weight: 850; }
+    .update-download, .update-install { border: 0; color: white; background: var(--blue-dark); }
+    .update-later, .update-skip { border: 1px solid #c7d4e6; color: #506078; background: #fff; }
 
     .hero {
       position: relative;
@@ -234,8 +266,15 @@
     }
     @media (max-width: 640px) {
       .shell { width: min(100% - 20px, 1480px); padding-top: 10px; }
-      .topbar { border-radius: 16px; }
+      .topbar { align-items: stretch; flex-direction: column; gap: 10px; border-radius: 16px; }
+      .badges { justify-content: space-between; }
+      .badges .badge { justify-content: center; }
       .badges .badge:first-child { display: none; }
+      .update-trigger { flex: 1; padding-left: 9px; padding-right: 9px; }
+      .update-banner { grid-template-columns: 36px minmax(0, 1fr); }
+      .update-symbol { width: 36px; height: 36px; }
+      .update-actions { grid-column: 1 / -1; justify-content: stretch; }
+      .update-actions button { flex: 1; }
       .hero { padding: 25px 22px; border-radius: 21px; }
       .hero p { font-size: 14px; }
       .card { border-radius: 19px; }
@@ -260,10 +299,31 @@
         </div>
       </div>
       <div class="badges">
-        <span class="badge" id="version-badge">Версія 0.4.11</span>
+        <span class="badge" id="version-badge">Версія 0.4.12</span>
         <span class="badge"><span class="dot" aria-hidden="true"></span>Працює офлайн</span>
+        <button class="badge update-trigger" id="check-updates" type="button" aria-controls="update-banner">Оновлення</button>
       </div>
     </header>
+
+    <section class="update-banner" id="update-banner" role="status" aria-live="polite" hidden>
+      <div class="update-symbol" id="update-symbol" aria-hidden="true">↓</div>
+      <div class="update-copy">
+        <div class="update-title" id="update-title">Перевіряємо оновлення…</div>
+        <div class="update-details" id="update-details">Це не затримує запуск і не передає введений текст.</div>
+        <ul class="update-notes" id="update-notes" hidden></ul>
+        <div class="update-progress" id="update-progress" hidden><span id="update-progress-value"></span></div>
+        <div class="update-settings">
+          <label><input id="auto-check-updates" type="checkbox" checked>Автоматично перевіряти раз на добу</label>
+          <label><input id="auto-download-updates" type="checkbox">Завантажувати у фоні</label>
+        </div>
+      </div>
+      <div class="update-actions">
+        <button class="update-download" id="download-update" type="button" hidden>Завантажити</button>
+        <button class="update-install" id="install-update" type="button" hidden>Установити</button>
+        <button class="update-later" id="update-later" type="button">Пізніше</button>
+        <button class="update-skip" id="skip-update" type="button" hidden>Пропустити</button>
+      </div>
+    </section>
 
     <section class="hero">
       <div class="hero-content">
@@ -342,7 +402,7 @@
 
     <footer class="footer">
       <span id="stats">322 682 словникові записи · GPL-3.0 · офлайн</span>
-      <span>© 2026 Зєнцов Дмитро Володимирович · ZL-UA-2026-0003 · zencovdmitro@gmail.com</span>
+      <span>© 2026 Зєнцов Дмитро Володимирович · ZL-UA-2026-0004 · zencovdmitro@gmail.com</span>
     </footer>
   </div>
 
@@ -362,12 +422,30 @@
     const results = document.querySelector('#results');
     const statusText = document.querySelector('#status-text');
     const resultCount = document.querySelector('#result-count');
+    const updateBanner = document.querySelector('#update-banner');
+    const updateSymbol = document.querySelector('#update-symbol');
+    const updateTitle = document.querySelector('#update-title');
+    const updateDetails = document.querySelector('#update-details');
+    const updateNotes = document.querySelector('#update-notes');
+    const updateProgress = document.querySelector('#update-progress');
+    const updateProgressValue = document.querySelector('#update-progress-value');
+    const downloadUpdateButton = document.querySelector('#download-update');
+    const installUpdateButton = document.querySelector('#install-update');
+    const skipUpdateButton = document.querySelector('#skip-update');
+    const autoCheckUpdates = document.querySelector('#auto-check-updates');
+    const autoDownloadUpdates = document.querySelector('#auto-download-updates');
 
     let direction = 'latin';
     let conversionTimer;
     let searchTimer;
     let conversionSequence = 0;
     let searchSequence = 0;
+    let sessionToken = '';
+    let updatePollTimer;
+    let visibleUpdateVersion = '';
+    let updateInteractionVisible = false;
+    let downloadRequested = false;
+    const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -597,6 +675,178 @@
       }
     }
 
+    function readSetting(key, fallback) {
+      try { const value = localStorage.getItem(key); return value === null ? fallback : value; }
+      catch { return fallback; }
+    }
+
+    function writeSetting(key, value) {
+      try { localStorage.setItem(key, String(value)); } catch {}
+    }
+
+    async function ensureSessionToken() {
+      if (sessionToken) return sessionToken;
+      const response = await fetch('/api/session', {cache: 'no-store'});
+      if (!response.ok) throw new Error('session_failed');
+      const data = await response.json();
+      if (!data.token) throw new Error('session_failed');
+      sessionToken = data.token;
+      return sessionToken;
+    }
+
+    async function updateRequest(path, options = {}) {
+      const token = await ensureSessionToken();
+      const response = await fetch(path, {
+        ...options,
+        cache: 'no-store',
+        headers: {...(options.headers || {}), 'X-ZIENTSOV-Token': token}
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'update_request_failed');
+      return data;
+    }
+
+    function formatSize(value) {
+      const bytes = Number(value || 0);
+      if (!bytes) return '';
+      return bytes >= 1024 * 1024
+        ? `${(bytes / 1024 / 1024).toLocaleString('uk-UA', {maximumFractionDigits: 1})} МБ`
+        : `${Math.ceil(bytes / 1024).toLocaleString('uk-UA')} КБ`;
+    }
+
+    function resetUpdateView() {
+      updateBanner.classList.remove('error');
+      updateNotes.replaceChildren();
+      updateNotes.hidden = true;
+      updateProgress.hidden = true;
+      downloadUpdateButton.hidden = true;
+      installUpdateButton.hidden = true;
+      skipUpdateButton.hidden = true;
+      downloadUpdateButton.disabled = false;
+      installUpdateButton.disabled = false;
+    }
+
+    function scheduleUpdatePolling() {
+      clearTimeout(updatePollTimer);
+      updatePollTimer = setTimeout(async () => {
+        try {
+          const data = await updateRequest('/api/update/status');
+          renderUpdateState(data, true);
+          if (data.status === 'downloading') scheduleUpdatePolling();
+        } catch {
+          renderUpdateState({status: 'error', error: 'status_failed'}, true);
+        }
+      }, 500);
+    }
+
+    function renderUpdateState(data, manual = false) {
+      resetUpdateView();
+      const status = data.status || 'idle';
+      visibleUpdateVersion = data.version || visibleUpdateVersion;
+      const skipped = readSetting('zientsov.update.skippedVersion', '');
+      if (status === 'current') {
+        if (!manual) { updateBanner.hidden = true; return; }
+        updateBanner.hidden = false;
+        updateSymbol.textContent = '✓';
+        updateTitle.textContent = 'Установлено найновішу версію';
+        updateDetails.textContent = `Поточна версія ${data.currentVersion}. Новіших стабільних випусків немає.`;
+        return;
+      }
+      if (status === 'error') {
+        if (!manual && !updateInteractionVisible) { updateBanner.hidden = true; return; }
+        updateBanner.hidden = false;
+        updateBanner.classList.add('error');
+        updateSymbol.textContent = '!';
+        updateTitle.textContent = 'Не вдалося перевірити оновлення';
+        updateDetails.textContent = ['checksum_mismatch', 'download_size_mismatch', 'installer_asset_mismatch'].includes(data.error)
+          ? 'Завантажений файл не пройшов перевірку цілісності й не буде запущений.'
+          : 'Перевірте з’єднання з інтернетом. Офлайн-функції застосунку продовжують працювати.';
+        return;
+      }
+      if (status === 'checking') {
+        if (!manual) return;
+        updateBanner.hidden = false;
+        updateSymbol.textContent = '…';
+        updateTitle.textContent = 'Перевіряємо оновлення…';
+        updateDetails.textContent = 'Зіставляємо поточну версію з офіційним стабільним випуском.';
+        return;
+      }
+      if (status === 'available' && skipped === data.version && !manual && !data.mandatory) {
+        updateBanner.hidden = true;
+        return;
+      }
+      if (['available', 'downloading', 'ready', 'installing'].includes(status)) {
+        updateInteractionVisible = true;
+        updateBanner.hidden = false;
+        updateSymbol.textContent = status === 'ready' ? '✓' : status === 'installing' ? '↻' : '↓';
+        updateTitle.textContent = status === 'installing' ? 'Запускаємо встановлення…' : `Доступна версія ${data.version || visibleUpdateVersion}`;
+        const size = formatSize(data.size || data.total);
+        updateDetails.textContent = status === 'downloading'
+          ? `Завантажено ${formatSize(data.downloaded)} із ${size}. Після завантаження файл буде перевірено.`
+          : status === 'ready'
+            ? 'Файл завантажено, його розмір і SHA-256 перевірено. Установлення почнеться лише після вашого підтвердження.'
+            : status === 'installing'
+              ? 'Збережіть роботу в інших програмах і завершіть установлення у вікні майстра.'
+              : `Розмір завантаження: ${size}. Застосунок працюватиме під час завантаження.`;
+        if (Array.isArray(data.notes) && data.notes.length) {
+          for (const note of data.notes) updateNotes.append(element('li', '', note));
+          updateNotes.hidden = false;
+        }
+        if (status === 'available') {
+          downloadUpdateButton.hidden = false;
+          skipUpdateButton.hidden = Boolean(data.mandatory);
+          if (autoDownloadUpdates.checked && !downloadRequested) startUpdateDownload();
+        } else if (status === 'downloading') {
+          updateProgress.hidden = false;
+          updateProgressValue.style.width = `${Number(data.progress || 0)}%`;
+        } else if (status === 'ready') {
+          installUpdateButton.hidden = false;
+          downloadRequested = false;
+        }
+      }
+    }
+
+    async function checkForUpdates(manual = false) {
+      if (!manual && !autoCheckUpdates.checked) return;
+      const last = Number(readSetting('zientsov.update.lastCheck', '0'));
+      if (!manual && Date.now() - last < UPDATE_CHECK_INTERVAL) return;
+      if (manual) {
+        updateInteractionVisible = true;
+        renderUpdateState({status: 'checking'}, true);
+      }
+      try {
+        const data = await updateRequest(`/api/update/check${manual ? '?force=1' : ''}`);
+        if (data.status !== 'error') writeSetting('zientsov.update.lastCheck', Date.now());
+        renderUpdateState(data, manual);
+      } catch {
+        renderUpdateState({status: 'error', error: 'check_failed'}, manual);
+      }
+    }
+
+    async function startUpdateDownload() {
+      if (downloadRequested) return;
+      downloadRequested = true;
+      try {
+        const data = await updateRequest('/api/update/download', {method: 'POST'});
+        renderUpdateState(data, true);
+        scheduleUpdatePolling();
+      } catch {
+        downloadRequested = false;
+        renderUpdateState({status: 'error', error: 'download_failed'}, true);
+      }
+    }
+
+    async function installUpdate() {
+      installUpdateButton.disabled = true;
+      try {
+        const data = await updateRequest('/api/update/install', {method: 'POST'});
+        renderUpdateState(data, true);
+      } catch {
+        installUpdateButton.disabled = false;
+        renderUpdateState({status: 'error', error: 'install_failed'}, true);
+      }
+    }
+
     sourceText.addEventListener('input', () => scheduleConversion());
     document.querySelector('#to-latin').addEventListener('click', () => setDirection('latin'));
     document.querySelector('#to-cyrillic').addEventListener('click', () => setDirection('cyrillic'));
@@ -635,6 +885,28 @@
       });
     });
 
+    autoCheckUpdates.checked = readSetting('zientsov.update.autoCheck', '1') !== '0';
+    autoDownloadUpdates.checked = readSetting('zientsov.update.autoDownload', '0') === '1';
+    document.querySelector('#check-updates').addEventListener('click', () => checkForUpdates(true));
+    downloadUpdateButton.addEventListener('click', startUpdateDownload);
+    installUpdateButton.addEventListener('click', installUpdate);
+    document.querySelector('#update-later').addEventListener('click', () => {
+      updateBanner.hidden = true;
+      updateInteractionVisible = false;
+    });
+    skipUpdateButton.addEventListener('click', () => {
+      if (visibleUpdateVersion) writeSetting('zientsov.update.skippedVersion', visibleUpdateVersion);
+      updateBanner.hidden = true;
+      updateInteractionVisible = false;
+    });
+    autoCheckUpdates.addEventListener('change', () => {
+      writeSetting('zientsov.update.autoCheck', autoCheckUpdates.checked ? '1' : '0');
+      if (autoCheckUpdates.checked) checkForUpdates(true);
+    });
+    autoDownloadUpdates.addEventListener('change', () => {
+      writeSetting('zientsov.update.autoDownload', autoDownloadUpdates.checked ? '1' : '0');
+    });
+
     fetch('/api/stats').then(response => response.json()).then(data => {
       const count = Number(data.unique_entries || 322682).toLocaleString('uk-UA');
       document.querySelector('#stats').textContent = `${count} словникові записи · GPL-3.0 · офлайн`;
@@ -642,6 +914,8 @@
     }).catch(() => {});
 
     updateSourceCount();
+    setTimeout(() => checkForUpdates(false), 5000);
+    setInterval(() => checkForUpdates(false), 60 * 60 * 1000);
   </script>
 </body>
 </html>

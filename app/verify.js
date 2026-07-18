@@ -17,5 +17,4 @@ for(const line of fs.readFileSync(manifest,'utf8').split(/\r?\n/)){
   checked++;
 }
 if(errors.length){console.error('ПЕРЕВІРКУ НЕ ПРОЙДЕНО');errors.forEach(x=>console.error(x));process.exit(1);}
-console.log(`ПЕРЕВІРКУ ПРОЙДЕНО: ${checked} файлів відповідають випуску ZL-UA-2026-0003`);
-
+console.log(`ПЕРЕВІРКУ ПРОЙДЕНО: ${checked} файлів відповідають випуску ZL-UA-2026-0004`);

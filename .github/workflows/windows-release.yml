@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -60,11 +60,11 @@ jobs:
         run: '& "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /INPUTCHARSET UTF8 installer\windows.nsi'
       - name: Validate installer archive
         shell: pwsh
-        run: 7z t .\ZIENTSOV_LATYNKA_Setup_v0.4.11.exe
+        run: 7z t .\ZIENTSOV_LATYNKA_Setup_v0.4.12.exe
       - name: Installed application, launcher and uninstaller QA
         shell: pwsh
         run: |
-          $installer = Join-Path $PWD 'ZIENTSOV_LATYNKA_Setup_v0.4.11.exe'
+          $installer = Join-Path $PWD 'ZIENTSOV_LATYNKA_Setup_v0.4.12.exe'
           $installed = Join-Path $env:LOCALAPPDATA 'Programs\ZIENTSOV LATYNKA'
           $install = Start-Process $installer -ArgumentList '/S' -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Інсталятор повернув код $($install.ExitCode)" }
@@ -74,9 +74,9 @@ jobs:
           if (Test-Path (Join-Path $installed 'START_ZIENTSOV_LATYNKA.vbs')) { throw 'Застарілий VBS-запускник не повинен встановлюватися' }
           $launcherPath = Join-Path $installed 'ZIENTSOV_LATYNKA.exe'
           $launcherVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($launcherPath).FileVersion
-          if ($launcherVersion -ne '0.4.11.0') { throw "Хибна версія запускника: $launcherVersion" }
+          if ($launcherVersion -ne '0.4.12.0') { throw "Хибна версія запускника: $launcherVersion" }
           $registry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA'
-          if ($registry.DisplayVersion -ne '0.4.11') { throw "Хибна версія у реєстрі: $($registry.DisplayVersion)" }
+          if ($registry.DisplayVersion -ne '0.4.12') { throw "Хибна версія у реєстрі: $($registry.DisplayVersion)" }
           if ($registry.Publisher -ne 'Зєнцов Дмитро Володимирович') { throw "Хибний видавець: $($registry.Publisher)" }
           $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ZIENTSOV LATYNKA.lnk'
           $menuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'ZIENTSOV LATYNKA\ZIENTSOV LATYNKA.lnk'
@@ -84,6 +84,15 @@ jobs:
             if (-not (Test-Path $shortcutPath)) { throw "Не створено ярлик: $shortcutPath" }
             $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
             if ($shortcut.TargetPath -ne $launcherPath) { throw "Ярлик веде не на нативний запускник: $($shortcut.TargetPath)" }
+          }
+          $repeatInstall = Start-Process $installer -ArgumentList '/S' -Wait -PassThru
+          if ($repeatInstall.ExitCode -ne 0) { throw "Повторне встановлення повернуло код $($repeatInstall.ExitCode)" }
+          $desktopCopies = @(Get-ChildItem ([Environment]::GetFolderPath('Desktop')) -Filter 'ZIENTSOV LATYNKA*.lnk')
+          $menuCopies = @(Get-ChildItem (Join-Path ([Environment]::GetFolderPath('Programs')) 'ZIENTSOV LATYNKA') -Filter 'ZIENTSOV LATYNKA*.lnk')
+          if ($desktopCopies.Count -ne 1 -or $menuCopies.Count -ne 1) { throw "Повторне встановлення створило дублікати ярлика: стільниця=$($desktopCopies.Count), меню=$($menuCopies.Count)" }
+          foreach ($shortcutPath in @($desktopShortcut,$menuShortcut)) {
+            $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+            if ($shortcut.TargetPath -ne $launcherPath) { throw "Повторне встановлення пошкодило ярлик: $shortcutPath" }
           }
           $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
           $launch = Start-Process $launcherPath -ArgumentList '--no-window' -PassThru
@@ -95,10 +104,27 @@ jobs:
           if ($launch.ExitCode -ne 0) { throw "Запускник повернув код $($launch.ExitCode)" }
           if ($stopwatch.ElapsedMilliseconds -gt 5000) { throw "Повільний перший запуск: $($stopwatch.ElapsedMilliseconds) мс" }
           $stats = Invoke-RestMethod 'http://127.0.0.1:8765/api/stats'
-          if ($stats.project -ne 'ZIENTSOV LATYNKA' -or $stats.version -ne '0.4.11' -or $stats.unique_entries -ne '322682') { throw 'Встановлений застосунок повернув хибні метадані' }
+          if ($stats.project -ne 'ZIENTSOV LATYNKA' -or $stats.version -ne '0.4.12' -or $stats.unique_entries -ne '322682') { throw 'Встановлений застосунок повернув хибні метадані' }
           $body = @{text='Здание';direction='latin'} | ConvertTo-Json -Compress
           $check = Invoke-RestMethod 'http://127.0.0.1:8765/api/convert' -Method Post -ContentType 'application/json' -Body $body
           if ($check.ok -or -not ($check.errors.suggestions -contains 'Будівля')) { throw 'Встановлений застосунок не виправляє «Здание» на «Будівля»' }
+          $edge = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $edge) { throw 'Не знайдено Microsoft Edge для візуального тесту' }
+          $visualDirectory = Join-Path $PWD 'visual-qa'
+          New-Item $visualDirectory -ItemType Directory -Force | Out-Null
+          $wideScreenshot = Join-Path $visualDirectory '01-windows-wide.png'
+          $narrowScreenshot = Join-Path $visualDirectory '02-windows-narrow.png'
+          $wideProfile = Join-Path $env:RUNNER_TEMP 'zientsov-edge-wide'
+          $narrowProfile = Join-Path $env:RUNNER_TEMP 'zientsov-edge-narrow'
+          $wideCapture = Start-Process $edge -ArgumentList @('--headless=new','--disable-gpu','--hide-scrollbars','--window-size=1440,1000',"--user-data-dir=$wideProfile","--screenshot=$wideScreenshot",'http://127.0.0.1:8765/') -Wait -PassThru
+          $narrowCapture = Start-Process $edge -ArgumentList @('--headless=new','--disable-gpu','--hide-scrollbars','--window-size=412,915',"--user-data-dir=$narrowProfile","--screenshot=$narrowScreenshot",'http://127.0.0.1:8765/') -Wait -PassThru
+          if ($wideCapture.ExitCode -ne 0 -or $narrowCapture.ExitCode -ne 0) { throw 'Microsoft Edge не завершив візуальний тест' }
+          foreach ($screenshot in @($wideScreenshot,$narrowScreenshot)) {
+            if (-not (Test-Path $screenshot) -or (Get-Item $screenshot).Length -lt 30000) { throw "Візуальний тест не створив повний знімок: $screenshot" }
+          }
           Write-Host "Перший запуск встановленого застосунку: $($stopwatch.ElapsedMilliseconds) мс"
           $uninstall = Start-Process (Join-Path $installed 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Деінсталятор повернув код $($uninstall.ExitCode)" }
@@ -106,18 +132,46 @@ jobs:
           if (Test-Path $installed) { throw 'Папку застосунку не видалено' }
           if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA') { throw 'Запис деінсталяції залишився у реєстрі' }
           if (Test-Path $desktopShortcut) { throw 'Ярлик на стільниці не видалено' }
-      - name: Create SHA-256
+      - name: Create SHA-256 and update manifest
         shell: pwsh
         run: |
-          $name = 'ZIENTSOV_LATYNKA_Setup_v0.4.11.exe'
+          $name = 'ZIENTSOV_LATYNKA_Setup_v0.4.12.exe'
           $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $name" | Set-Content 'ZIENTSOV_LATYNKA_Setup_v0.4.11.sha256' -Encoding ascii
+          "$hash  $name" | Set-Content 'ZIENTSOV_LATYNKA_Setup_v0.4.12.sha256' -Encoding ascii
+          $manifest = [ordered]@{
+            schema = 1
+            product = 'ZIENTSOV LATYNKA'
+            channel = 'stable'
+            version = '0.4.12'
+            published_at = (Get-Date).ToUniversalTime().ToString('o')
+            mandatory = $false
+            notes = @(
+              'Додано безпечну фонову перевірку нових стабільних версій.'
+              'Додано завантаження з перевіркою розміру та SHA-256.'
+              'Оновлення встановлюється лише після підтвердження користувача.'
+            )
+            installer = [ordered]@{ name = $name; sha256 = $hash; size = (Get-Item $name).Length }
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content 'ZIENTSOV_LATYNKA_Update_v0.4.12.json' -Encoding utf8
+          $parsed = Get-Content 'ZIENTSOV_LATYNKA_Update_v0.4.12.json' -Raw | ConvertFrom-Json
+          if ($parsed.installer.sha256 -ne $hash -or $parsed.installer.size -ne (Get-Item $name).Length) { throw 'Хибний маніфест оновлення' }
           Write-Host "SHA256: $hash"
       - uses: actions/upload-artifact@v7
         with:
-          name: ZIENTSOV_LATYNKA_Setup_v0.4.11
+          name: ZIENTSOV_LATYNKA_Setup_v0.4.12
           path: |
-            ZIENTSOV_LATYNKA_Setup_v0.4.11.exe
-            ZIENTSOV_LATYNKA_Setup_v0.4.11.sha256
+            ZIENTSOV_LATYNKA_Setup_v0.4.12.exe
+            ZIENTSOV_LATYNKA_Setup_v0.4.12.sha256
+            ZIENTSOV_LATYNKA_Update_v0.4.12.json
+            visual-qa\01-windows-wide.png
+            visual-qa\02-windows-narrow.png
           if-no-files-found: error
           compression-level: 0
+      - name: Publish stable GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:GITHUB_REF_NAME -ne 'v0.4.12') { throw "Тег $env:GITHUB_REF_NAME не відповідає версії 0.4.12" }
+          gh release create $env:GITHUB_REF_NAME --verify-tag --latest --title 'ZIENTSOV LATYNKA 0.4.12' --notes-file RELEASE_NOTES_UK.md ZIENTSOV_LATYNKA_Setup_v0.4.12.exe ZIENTSOV_LATYNKA_Setup_v0.4.12.sha256 ZIENTSOV_LATYNKA_Update_v0.4.12.json

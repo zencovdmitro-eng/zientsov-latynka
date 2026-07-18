@@ -12,8 +12,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("\u0417\u0454\u043d\u0446\u043e\u0432 \u0414\u043c\u0438\u0442\u0440\u043e \u0412\u043e\u043b\u043e\u0434\u0438\u043c\u0438\u0440\u043e\u0432\u0438\u0447")]
 [assembly: AssemblyProduct("ZIENTSOV LATYNKA")]
 [assembly: AssemblyCopyright("Copyright \u00a9 2026 \u0417\u0454\u043d\u0446\u043e\u0432 \u0414\u043c\u0438\u0442\u0440\u043e \u0412\u043e\u043b\u043e\u0434\u0438\u043c\u0438\u0440\u043e\u0432\u0438\u0447")]
-[assembly: AssemblyVersion("0.4.11.0")]
-[assembly: AssemblyFileVersion("0.4.11.0")]
+[assembly: AssemblyVersion("0.4.12.0")]
+[assembly: AssemblyFileVersion("0.4.12.0")]
 
 internal static class Program
 {
