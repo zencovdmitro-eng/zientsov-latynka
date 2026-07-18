@@ -28,15 +28,15 @@ jobs:
       - name: Ukrainian UI QA
         run: npm run test:ui
       - name: Prepare deterministic payload
-        shell: powershell
+        shell: pwsh
         run: .\prepare_release.ps1
       - name: API, spelling and startup QA
         run: npm run test:release
       - name: Install NSIS
-        shell: powershell
+        shell: pwsh
         run: choco install nsis --no-progress -y
       - name: Normalize Ukrainian installer terminology
-        shell: powershell
+        shell: pwsh
         run: |
           $files = @(
             "${env:ProgramFiles(x86)}\NSIS\Contrib\Language files\Ukrainian.nsh",
@@ -56,13 +56,13 @@ jobs:
             [System.IO.File]::WriteAllText($file, $text, [System.Text.UTF8Encoding]::new($true))
           }
       - name: Build installer
-        shell: powershell
+        shell: pwsh
         run: '& "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /INPUTCHARSET UTF8 installer\windows.nsi'
       - name: Validate installer archive
-        shell: powershell
+        shell: pwsh
         run: 7z t .\ZIENTSOV_LATYNKA_Setup_v0.4.11.exe
       - name: Installed application, launcher and uninstaller QA
-        shell: powershell
+        shell: pwsh
         run: |
           $installer = Join-Path $PWD 'ZIENTSOV_LATYNKA_Setup_v0.4.11.exe'
           $installed = Join-Path $env:LOCALAPPDATA 'Programs\ZIENTSOV LATYNKA'
@@ -103,7 +103,7 @@ jobs:
           if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA') { throw 'Запис деінсталяції залишився у реєстрі' }
           if (Test-Path $desktopShortcut) { throw 'Ярлик на стільниці не видалено' }
       - name: Create SHA-256
-        shell: powershell
+        shell: pwsh
         run: |
           $name = 'ZIENTSOV_LATYNKA_Setup_v0.4.11.exe'
           $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLowerInvariant()
