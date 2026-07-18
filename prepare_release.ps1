@@ -10,7 +10,18 @@ Copy-Item (Join-Path $Root 'app\app.js') (Join-Path $Payload 'app\app.js')
 Copy-Item (Join-Path $Root 'app\verify.js') (Join-Path $Payload 'app\verify.js')
 Copy-Item (Join-Path $Root 'app\web\index.html') (Join-Path $Payload 'app\web\index.html')
 Copy-Item (Join-Path $Root 'app\data\*.json') (Join-Path $Payload 'app\data')
-Copy-Item (Join-Path $Root 'START_ZIENTSOV_LATYNKA.vbs') $Payload
+$Launcher = @'
+Option Explicit
+Dim shell, files, root, nodeExe, appJs
+Set shell = CreateObject("WScript.Shell")
+Set files = CreateObject("Scripting.FileSystemObject")
+root = files.GetParentFolderName(WScript.ScriptFullName)
+nodeExe = root & "\runtime\node.exe"
+appJs = root & "\app\app.js"
+If Not files.FileExists(nodeExe) Or Not files.FileExists(appJs) Then WScript.Quit 1
+shell.Run Chr(34) & nodeExe & Chr(34) & " " & Chr(34) & appJs & Chr(34), 0, False
+'@
+[System.IO.File]::WriteAllText((Join-Path $Payload 'START_ZIENTSOV_LATYNKA.vbs'), $Launcher, [System.Text.Encoding]::Unicode)
 Copy-Item (Get-Command node.exe).Source (Join-Path $Payload 'runtime\node.exe')
 Copy-Item (Join-Path $Root 'node_modules\nspell') (Join-Path $Payload 'app\node_modules\nspell') -Recurse
 Copy-Item (Join-Path $Root 'node_modules\is-buffer') (Join-Path $Payload 'app\node_modules\is-buffer') -Recurse
