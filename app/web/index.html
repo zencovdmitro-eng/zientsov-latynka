@@ -219,6 +219,11 @@
     .search-error { margin: 16px; padding: 17px; border: 1px solid #ffc8c2; border-radius: 14px; color: var(--error); background: var(--error-bg); }
     .search-error strong { display: block; margin-bottom: 4px; }
     .search-error p { margin: 0; font-size: 13px; line-height: 1.5; }
+    .translation-options { display: grid; gap: 9px; margin-top: 12px; }
+    .translation-option { width: 100%; border: 1px solid #ffb1a9; border-radius: 13px; background: #fff; padding: 11px 13px; color: var(--ink); text-align: left; cursor: pointer; }
+    .translation-option:hover { border-color: var(--blue); box-shadow: 0 5px 14px rgba(18,82,184,.12); }
+    .translation-option strong { display: block; margin: 0 0 3px; color: #b42318; font-size: 14px; }
+    .translation-option span { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
     .footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px 4px 0; color: #6f7b91; font-size: 11px; line-height: 1.55; }
     .footer span:last-child { text-align: right; }
@@ -255,7 +260,7 @@
         </div>
       </div>
       <div class="badges">
-        <span class="badge">Версія 0.4</span>
+        <span class="badge" id="version-badge">Версія 0.4.11</span>
         <span class="badge"><span class="dot" aria-hidden="true"></span>Працює офлайн</span>
       </div>
     </header>
@@ -515,12 +520,27 @@
       scheduleConversion(0);
     }
 
-    function renderSearchError(query, suggestions) {
+    function renderSearchError(query, suggestions, reason = '', options = []) {
       results.replaceChildren();
       const box = element('div', 'search-error');
-      box.append(element('strong', '', `«${query}» — імовірна орфографічна помилка`));
-      box.append(element('p', '', suggestions.length ? 'Оберіть правильний варіант:' : 'Слово не знайдено. Перевірте його написання.'));
-      if (suggestions.length) {
+      const languageHint = ['translation', 'surzhyk'].includes(reason);
+      box.append(element('strong', '', languageHint ? `«${query}» — російське або суржикове слово` : `«${query}» — імовірна орфографічна помилка`));
+      box.append(element('p', '', languageHint ? 'Оберіть нормативний український відповідник за значенням:' : suggestions.length ? 'Оберіть правильний варіант:' : 'Слово не знайдено. Перевірте його написання.'));
+      if (options.length) {
+        const list = element('div', 'translation-options');
+        for (const option of options) {
+          const button = element('button', 'translation-option');
+          button.type = 'button';
+          button.append(element('strong', '', option.word));
+          button.append(element('span', '', option.note));
+          button.addEventListener('click', () => {
+            searchInput.value = option.word;
+            runSearch();
+          });
+          list.append(button);
+        }
+        box.append(list);
+      } else if (suggestions.length) {
         const list = element('div', 'suggestions');
         for (const suggestion of suggestions) {
           const button = element('button', 'suggestion', suggestion);
@@ -555,7 +575,7 @@
         const items = data.results || [];
         if (!items.length) {
           statusText.textContent = 'Слово не знайдено';
-          renderSearchError(query, data.suggestions || []);
+          renderSearchError(query, data.suggestions || [], data.reason || '', data.options || []);
           return;
         }
         results.replaceChildren();
@@ -618,6 +638,7 @@
     fetch('/api/stats').then(response => response.json()).then(data => {
       const count = Number(data.unique_entries || 322682).toLocaleString('uk-UA');
       document.querySelector('#stats').textContent = `${count} словникові записи · GPL-3.0 · офлайн`;
+      if (data.version) document.querySelector('#version-badge').textContent = `Версія ${data.version}`;
     }).catch(() => {});
 
     updateSourceCount();
