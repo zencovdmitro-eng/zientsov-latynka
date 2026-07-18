@@ -6,7 +6,7 @@ const path = require('path');
 const {spawn} = require('child_process');
 const {Worker, isMainThread, parentPort, workerData} = require('worker_threads');
 const {DatabaseSync} = require('node:sqlite');
-const nspell = require('./node_modules/nspell');
+const nspell = require('nspell');
 
 const ROOT = __dirname;
 const PID_FILE = path.join(ROOT, '..', 'runtime.pid');
