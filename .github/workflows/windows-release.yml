@@ -30,6 +30,6 @@ jobs:
         run: '& "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /INPUTCHARSET UTF8 installer\windows.nsi'
       - uses: actions/upload-artifact@v4
         with:
-          name: ZIENTSOV_LATYNKA_Setup_v0.4.9
-          path: ZIENTSOV_LATYNKA_Setup_v0.4.9.exe
+          name: ZIENTSOV_LATYNKA_Setup_v0.4.10
+          path: ZIENTSOV_LATYNKA_Setup_v0.4.10.exe
           if-no-files-found: error
