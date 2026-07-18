@@ -7,7 +7,7 @@ Unicode True
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA"
 
 Name "${APP_NAME} ${APP_VERSION}"
-OutFile "ZIENTSOV_LATYNKA_Setup_v0.4.9.exe"
+OutFile "..\ZIENTSOV_LATYNKA_Setup_v0.4.9.exe"
 InstallDir "$LOCALAPPDATA\Programs\ZIENTSOV LATYNKA"
 InstallDirRegKey HKCU "Software\ZIENTSOV_LATYNKA" "InstallDir"
 RequestExecutionLevel user
@@ -49,7 +49,7 @@ FunctionEnd
 Section "ZIENTSOV LATYNKA" SEC_MAIN
   Call StopRunningApp
   SetOutPath "$INSTDIR"
-  File /r "dist\payload\*.*"
+  File /r "..\dist\payload\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\ZIENTSOV LATYNKA"
