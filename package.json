@@ -1,17 +1,22 @@
 {
   "name": "zientsov-latynka",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "Український орфографічний словник і двобічний транслітератор ZIENTSOV LATYNKA",
   "license": "GPL-3.0-only",
   "author": "Зєнцов Дмитро Володимирович <zencovdmitro@gmail.com>",
   "main": "app/app.js",
   "scripts": {
     "start": "node app/app.js",
-    "build:dictionary": "node build_dictionary.js"
+    "build:dictionary": "node build_dictionary.js",
+    "test:ui": "node tests/qa-ui.test.js",
+    "test:release": "node tests/qa-release.test.js"
   },
   "dependencies": {
     "dictionary-uk": "4.0.0",
     "nspell": "2.1.5"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
   },
   "engines": {
     "node": ">=24"
