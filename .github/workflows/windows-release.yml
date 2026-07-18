@@ -117,11 +117,10 @@ jobs:
           New-Item $visualDirectory -ItemType Directory -Force | Out-Null
           $wideScreenshot = Join-Path $visualDirectory '01-windows-wide.png'
           $narrowScreenshot = Join-Path $visualDirectory '02-windows-narrow.png'
-          $wideProfile = Join-Path $env:RUNNER_TEMP 'zientsov-edge-wide'
-          $narrowProfile = Join-Path $env:RUNNER_TEMP 'zientsov-edge-narrow'
-          $wideCapture = Start-Process $edge -ArgumentList @('--headless=new','--disable-gpu','--hide-scrollbars','--window-size=1440,1000',"--user-data-dir=$wideProfile","--screenshot=$wideScreenshot",'http://127.0.0.1:8765/') -Wait -PassThru
-          $narrowCapture = Start-Process $edge -ArgumentList @('--headless=new','--disable-gpu','--hide-scrollbars','--window-size=412,915',"--user-data-dir=$narrowProfile","--screenshot=$narrowScreenshot",'http://127.0.0.1:8765/') -Wait -PassThru
-          if ($wideCapture.ExitCode -ne 0 -or $narrowCapture.ExitCode -ne 0) { throw 'Microsoft Edge не завершив візуальний тест' }
+          node .\tests\capture-visual.js $edge 'http://127.0.0.1:8765/' $wideScreenshot 1440 1000
+          if ($LASTEXITCODE -ne 0) { throw 'Microsoft Edge не завершив широкий візуальний тест' }
+          node .\tests\capture-visual.js $edge 'http://127.0.0.1:8765/' $narrowScreenshot 412 915
+          if ($LASTEXITCODE -ne 0) { throw 'Microsoft Edge не завершив вузький візуальний тест' }
           foreach ($screenshot in @($wideScreenshot,$narrowScreenshot)) {
             if (-not (Test-Path $screenshot) -or (Get-Item $screenshot).Length -lt 30000) { throw "Візуальний тест не створив повний знімок: $screenshot" }
           }
