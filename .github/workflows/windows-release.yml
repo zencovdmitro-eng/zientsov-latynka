@@ -86,7 +86,11 @@ jobs:
             if ($shortcut.TargetPath -ne $launcherPath) { throw "Ярлик веде не на нативний запускник: $($shortcut.TargetPath)" }
           }
           $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-          $launch = Start-Process $launcherPath -ArgumentList '--no-window' -Wait -PassThru
+          $launch = Start-Process $launcherPath -ArgumentList '--no-window' -PassThru
+          if (-not $launch.WaitForExit(15000)) {
+            $launch.Kill()
+            throw 'Запускник не завершив підготовку застосунку за 15 секунд'
+          }
           $stopwatch.Stop()
           if ($launch.ExitCode -ne 0) { throw "Запускник повернув код $($launch.ExitCode)" }
           if ($stopwatch.ElapsedMilliseconds -gt 5000) { throw "Повільний перший запуск: $($stopwatch.ElapsedMilliseconds) мс" }
