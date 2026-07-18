@@ -13,12 +13,8 @@ InstallDirRegKey HKCU "Software\ZIENTSOV_LATYNKA" "InstallDir"
 RequestExecutionLevel user
 SetCompressor zlib
 BrandingText "ZIENTSOV LATYNKA · Зєнцов Дмитро Володимирович"
-Icon "payload_v046\app\assets\ZIENTSOV_LATYNKA.ico"
-UninstallIcon "payload_v046\app\assets\ZIENTSOV_LATYNKA.ico"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "payload_v046\app\assets\ZIENTSOV_LATYNKA.ico"
-!define MUI_UNICON "payload_v046\app\assets\ZIENTSOV_LATYNKA.ico"
 !define MUI_WELCOMEPAGE_TITLE "Встановлення ZIENTSOV LATYNKA ${APP_VERSION}"
 !define MUI_WELCOMEPAGE_TEXT "Український словник, перевірка правопису та транслітератор.$\r$\n$\r$\nМайстер допоможе встановити застосунок на цей комп’ютер."
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Оберіть папку для встановлення ZIENTSOV LATYNKA."
@@ -53,19 +49,19 @@ FunctionEnd
 Section "ZIENTSOV LATYNKA" SEC_MAIN
   Call StopRunningApp
   SetOutPath "$INSTDIR"
-  File /r "payload_v046\*.*"
+  File /r "dist\payload\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\ZIENTSOV LATYNKA"
-  CreateShortcut "$SMPROGRAMS\ZIENTSOV LATYNKA\ZIENTSOV LATYNKA.lnk" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs" "" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
+  CreateShortcut "$SMPROGRAMS\ZIENTSOV LATYNKA\ZIENTSOV LATYNKA.lnk" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs"
   CreateShortcut "$SMPROGRAMS\ZIENTSOV LATYNKA\Видалити ZIENTSOV LATYNKA.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\ZIENTSOV LATYNKA.lnk" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs" "" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
+  CreateShortcut "$DESKTOP\ZIENTSOV LATYNKA.lnk" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs"
 
   WriteRegStr HKCU "Software\ZIENTSOV_LATYNKA" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${APP_KEY}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKCU "${APP_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "${APP_KEY}" "Publisher" "${APP_PUBLISHER}"
-  WriteRegStr HKCU "${APP_KEY}" "DisplayIcon" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
+  WriteRegStr HKCU "${APP_KEY}" "DisplayIcon" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "${APP_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${APP_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKCU "${APP_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
