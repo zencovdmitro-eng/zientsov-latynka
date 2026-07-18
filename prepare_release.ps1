@@ -3,6 +3,7 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Payload = Join-Path $Root 'dist\payload'
 Remove-Item (Join-Path $Root 'dist') -Recurse -Force -ErrorAction SilentlyContinue
 New-Item (Join-Path $Payload 'app\data') -ItemType Directory -Force | Out-Null
+New-Item (Join-Path $Payload 'app\node_modules') -ItemType Directory -Force | Out-Null
 New-Item (Join-Path $Payload 'app\web') -ItemType Directory -Force | Out-Null
 New-Item (Join-Path $Payload 'runtime') -ItemType Directory -Force | Out-Null
 Copy-Item (Join-Path $Root 'app\app.js') (Join-Path $Payload 'app\app.js')
