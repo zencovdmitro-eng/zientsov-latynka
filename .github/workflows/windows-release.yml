@@ -3,8 +3,14 @@ name: Windows release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -13,23 +19,101 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - name: Ukrainian UI QA
+        run: npm run test:ui
       - name: Prepare deterministic payload
         shell: powershell
         run: .\prepare_release.ps1
+      - name: API, spelling and startup QA
+        run: npm run test:release
       - name: Install NSIS
         shell: powershell
         run: choco install nsis --no-progress -y
+      - name: Normalize Ukrainian installer terminology
+        shell: powershell
+        run: |
+          $files = @(
+            "${env:ProgramFiles(x86)}\NSIS\Contrib\Language files\Ukrainian.nsh",
+            "${env:ProgramFiles(x86)}\NSIS\Contrib\Language files\Ukrainian.nlf"
+          )
+          foreach ($file in $files) {
+            $text = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+            $text = $text.Replace('Оберіть теку', 'Оберіть папку')
+            $text = $text.Replace('Виберіть теку', 'Виберіть папку')
+            $text = $text.Replace('зазначену теку', 'зазначену папку')
+            $text = $text.Replace('іншу теку', 'іншу папку')
+            $text = $text.Replace('потрібну теку', 'потрібну папку')
+            $text = $text.Replace('Тека призначення', 'Папка призначення')
+            $text = $text.Replace('зазначеної теки', 'зазначеної папки')
+            $text = $text.Replace('іншої теки', 'іншої папки')
+            if ($text -match 'Оберіть теку|Виберіть теку|Тека призначення') { throw "Не виправлено термінологію у $file" }
+            [System.IO.File]::WriteAllText($file, $text, [System.Text.UTF8Encoding]::new($true))
+          }
       - name: Build installer
         shell: powershell
         run: '& "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /INPUTCHARSET UTF8 installer\windows.nsi'
-      - uses: actions/upload-artifact@v4
+      - name: Validate installer archive
+        shell: powershell
+        run: 7z t .\ZIENTSOV_LATYNKA_Setup_v0.4.11.exe
+      - name: Installed application, launcher and uninstaller QA
+        shell: powershell
+        run: |
+          $installer = Join-Path $PWD 'ZIENTSOV_LATYNKA_Setup_v0.4.11.exe'
+          $installed = Join-Path $env:LOCALAPPDATA 'Programs\ZIENTSOV LATYNKA'
+          $install = Start-Process $installer -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Інсталятор повернув код $($install.ExitCode)" }
+          @('runtime\node.exe','app\app.js','app\web\index.html','app\data\zientsov_latynka_slovnyk.sqlite3','app\data\translation_hints.json','ZIENTSOV_LATYNKA.exe','Uninstall.exe') | ForEach-Object {
+            if (-not (Test-Path (Join-Path $installed $_))) { throw "Після встановлення немає файла: $_" }
+          }
+          if (Test-Path (Join-Path $installed 'START_ZIENTSOV_LATYNKA.vbs')) { throw 'Застарілий VBS-запускник не повинен встановлюватися' }
+          $launcherPath = Join-Path $installed 'ZIENTSOV_LATYNKA.exe'
+          $launcherVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($launcherPath).FileVersion
+          if ($launcherVersion -ne '0.4.11.0') { throw "Хибна версія запускника: $launcherVersion" }
+          $registry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA'
+          if ($registry.DisplayVersion -ne '0.4.11') { throw "Хибна версія у реєстрі: $($registry.DisplayVersion)" }
+          if ($registry.Publisher -ne 'Зєнцов Дмитро Володимирович') { throw "Хибний видавець: $($registry.Publisher)" }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ZIENTSOV LATYNKA.lnk'
+          $menuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'ZIENTSOV LATYNKA\ZIENTSOV LATYNKA.lnk'
+          foreach ($shortcutPath in @($desktopShortcut,$menuShortcut)) {
+            if (-not (Test-Path $shortcutPath)) { throw "Не створено ярлик: $shortcutPath" }
+            $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+            if ($shortcut.TargetPath -ne $launcherPath) { throw "Ярлик веде не на нативний запускник: $($shortcut.TargetPath)" }
+          }
+          $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          $launch = Start-Process $launcherPath -ArgumentList '--no-window' -Wait -PassThru
+          $stopwatch.Stop()
+          if ($launch.ExitCode -ne 0) { throw "Запускник повернув код $($launch.ExitCode)" }
+          if ($stopwatch.ElapsedMilliseconds -gt 5000) { throw "Повільний перший запуск: $($stopwatch.ElapsedMilliseconds) мс" }
+          $stats = Invoke-RestMethod 'http://127.0.0.1:8765/api/stats'
+          if ($stats.project -ne 'ZIENTSOV LATYNKA' -or $stats.version -ne '0.4.11' -or $stats.unique_entries -ne '322682') { throw 'Встановлений застосунок повернув хибні метадані' }
+          $body = @{text='Здание';direction='latin'} | ConvertTo-Json -Compress
+          $check = Invoke-RestMethod 'http://127.0.0.1:8765/api/convert' -Method Post -ContentType 'application/json' -Body $body
+          if ($check.ok -or -not ($check.errors.suggestions -contains 'Будівля')) { throw 'Встановлений застосунок не виправляє «Здание» на «Будівля»' }
+          Write-Host "Перший запуск встановленого застосунку: $($stopwatch.ElapsedMilliseconds) мс"
+          $uninstall = Start-Process (Join-Path $installed 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Деінсталятор повернув код $($uninstall.ExitCode)" }
+          for ($i=0; $i -lt 50 -and (Test-Path $installed); $i++) { Start-Sleep -Milliseconds 100 }
+          if (Test-Path $installed) { throw 'Папку застосунку не видалено' }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA') { throw 'Запис деінсталяції залишився у реєстрі' }
+          if (Test-Path $desktopShortcut) { throw 'Ярлик на стільниці не видалено' }
+      - name: Create SHA-256
+        shell: powershell
+        run: |
+          $name = 'ZIENTSOV_LATYNKA_Setup_v0.4.11.exe'
+          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content 'ZIENTSOV_LATYNKA_Setup_v0.4.11.sha256' -Encoding ascii
+          Write-Host "SHA256: $hash"
+      - uses: actions/upload-artifact@v7
         with:
-          name: ZIENTSOV_LATYNKA_Setup_v0.4.10
-          path: ZIENTSOV_LATYNKA_Setup_v0.4.10.exe
+          name: ZIENTSOV_LATYNKA_Setup_v0.4.11
+          path: |
+            ZIENTSOV_LATYNKA_Setup_v0.4.11.exe
+            ZIENTSOV_LATYNKA_Setup_v0.4.11.sha256
           if-no-files-found: error
+          compression-level: 0
