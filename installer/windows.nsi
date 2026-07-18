@@ -2,12 +2,12 @@ Unicode True
 !include "MUI2.nsh"
 
 !define APP_NAME "ZIENTSOV LATYNKA"
-!define APP_VERSION "0.4.10"
+!define APP_VERSION "0.4.11"
 !define APP_PUBLISHER "Зєнцов Дмитро Володимирович"
 !define APP_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\ZIENTSOV_LATYNKA"
 
 Name "${APP_NAME} ${APP_VERSION}"
-OutFile "..\ZIENTSOV_LATYNKA_Setup_v0.4.10.exe"
+OutFile "..\ZIENTSOV_LATYNKA_Setup_v0.4.11.exe"
 InstallDir "$LOCALAPPDATA\Programs\ZIENTSOV LATYNKA"
 InstallDirRegKey HKCU "Software\ZIENTSOV_LATYNKA" "InstallDir"
 RequestExecutionLevel user
@@ -19,10 +19,12 @@ UninstallIcon "..\dist\payload\app\assets\ZIENTSOV_LATYNKA.ico"
 !define MUI_ABORTWARNING
 !define MUI_ICON "..\dist\payload\app\assets\ZIENTSOV_LATYNKA.ico"
 !define MUI_UNICON "..\dist\payload\app\assets\ZIENTSOV_LATYNKA.ico"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "..\dist\installer-sidebar.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "..\dist\installer-sidebar.bmp"
 !define MUI_WELCOMEPAGE_TITLE "Встановлення ZIENTSOV LATYNKA ${APP_VERSION}"
 !define MUI_WELCOMEPAGE_TEXT "Український словник, перевірка правопису та транслітератор.$\r$\n$\r$\nМайстер допоможе встановити застосунок на цей комп’ютер."
 !define MUI_DIRECTORYPAGE_TEXT_TOP "Оберіть папку для встановлення ZIENTSOV LATYNKA."
-!define MUI_FINISHPAGE_RUN "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\ZIENTSOV_LATYNKA.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Запустити ZIENTSOV LATYNKA"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchApp
 !define MUI_FINISHPAGE_LINK "Власник: Зєнцов Дмитро Володимирович"
@@ -47,19 +49,20 @@ done:
 FunctionEnd
 
 Function LaunchApp
-  Exec '"$SYSDIR\wscript.exe" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs"'
+  Exec '"$INSTDIR\ZIENTSOV_LATYNKA.exe"'
 FunctionEnd
 
 Section "ZIENTSOV LATYNKA" SEC_MAIN
   Call StopRunningApp
   SetOutPath "$INSTDIR"
+  Delete "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs"
   File /r "..\dist\payload\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\ZIENTSOV LATYNKA"
-  CreateShortcut "$SMPROGRAMS\ZIENTSOV LATYNKA\ZIENTSOV LATYNKA.lnk" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs" "" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
+  CreateShortcut "$SMPROGRAMS\ZIENTSOV LATYNKA\ZIENTSOV LATYNKA.lnk" "$INSTDIR\ZIENTSOV_LATYNKA.exe" "" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
   CreateShortcut "$SMPROGRAMS\ZIENTSOV LATYNKA\Видалити ZIENTSOV LATYNKA.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\ZIENTSOV LATYNKA.lnk" "$INSTDIR\START_ZIENTSOV_LATYNKA.vbs" "" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
+  CreateShortcut "$DESKTOP\ZIENTSOV LATYNKA.lnk" "$INSTDIR\ZIENTSOV_LATYNKA.exe" "" "$INSTDIR\app\assets\ZIENTSOV_LATYNKA.ico"
 
   WriteRegStr HKCU "Software\ZIENTSOV_LATYNKA" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${APP_KEY}" "DisplayName" "${APP_NAME}"
